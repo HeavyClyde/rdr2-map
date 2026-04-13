@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Carte RDR2 Interactive</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; font-family: 'Special Elite', cursive; background:#1b1a17; color:#f5e6c8; }
+    #map { height: 100vh; }
+
+    .menu {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(20,15,10,0.9);
+      padding: 15px;
+      border-radius: 12px;
+      z-index: 1000;
+      box-shadow: 0 0 15px black;
+    }
+
+    input, select, button {
+      display: block;
+      margin-bottom: 8px;
+      width: 180px;
+      padding: 5px;
+      background:#2a2621;
+      border:none;
+      color:#f5e6c8;
+    }
+
+    button {
+      cursor: pointer;
+      background:#6b4f2a;
+    }
+
+    .filters {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(20,15,10,0.9);
+      padding: 10px;
+      border-radius: 12px;
+      z-index: 1000;
+    }
+
+    .filters button {
+      margin: 2px;
+      width: auto;
+      padding: 5px 10px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="menu">
+  <input type="text" id="name" placeholder="Nom" />
+  <select id="type">
+    <option value="registre">Registre seul</option>
+    <option value="culture">Table de culture</option>
+    <option value="bandit">Camp de bandit</option>
+    <option value="poi">Point d'intérêt</option>
+  </select>
+  <input type="file" id="image" />
+  <button onclick="enableAddMode()">Ajouter un point</button>
+</div>
+
+<div class="filters">
+  <button onclick="setFilter('all')">Tout</button>
+  <button onclick="setFilter('registre')">Registre</button>
+  <button onclick="setFilter('culture')">Culture</button>
+  <button onclick="setFilter('bandit')">Bandit</button>
+  <button onclick="setFilter('poi')">POI</button>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-storage-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_BUCKET",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const storage = firebase.storage();
+
+const map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
+const bounds = [[0,0], [1000,1000]];
+L.imageOverlay('map-rdr2.jpg', bounds).addTo(map);
+map.fitBounds(bounds);
+
+const icons = {
+  registre: L.icon({ iconUrl: 'icons/registre.png', iconSize: [32, 32] }),
+  culture: L.icon({ iconUrl: 'icons/culture.png', iconSize: [32, 32] }),
+  bandit: L.icon({ iconUrl: 'icons/bandit.png', iconSize: [32, 32] }),
+  poi: L.icon({ iconUrl: 'icons/poi.png', iconSize: [32, 32] })
+};
+
+let markers = [];
+let currentFilter = 'all';
+
+function renderPoint(doc) {
+  const p = doc.data();
+
+  const marker = L.marker([p.y, p.x], { icon: icons[p.type] }).addTo(map);
+
+  marker.data = { id: doc.id, type: p.type };
+
+  marker.on('mouseover', () => {
+    marker.bindPopup(`
+      <b>${p.name}</b><br>
+      <i>${p.type}</i><br>
+      <img src="${p.imageUrl}" width="200"><br>
+      <button onclick="deletePoint('${doc.id}')">Supprimer</button>
+    `).openPopup();
+  });
+
+  markers.push(marker);
+}
+
+function refreshMarkers() {
+  markers.forEach(m => {
+    if (currentFilter === 'all' || m.data.type === currentFilter) {
+      m.addTo(map);
+    } else {
+      map.removeLayer(m);
+    }
+  });
+}
+
+function setFilter(type) {
+  currentFilter = type;
+  refreshMarkers();
+}
+
+function deletePoint(id) {
+  if (confirm("Supprimer ce point ?")) {
+    db.collection("points").doc(id).delete();
+    location.reload();
+  }
+}
+
+// realtime
+markers = [];
+db.collection("points").onSnapshot(snapshot => {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  snapshot.forEach(doc => renderPoint(doc));
+  refreshMarkers();
+});
+
+let addMode = false;
+function enableAddMode() {
+  addMode = true;
+  alert("Clique sur la carte pour placer le point");
+}
+
+map.on('click', async function(e) {
+  if (!addMode) return;
+
+  const name = document.getElementById("name").value;
+  const type = document.getElementById("type").value;
+  const file = document.getElementById("image").files[0];
+
+  if (!name || !file) {
+    alert("Remplis tous les champs");
+    return;
+  }
+
+  const storageRef = storage.ref("images/" + Date.now() + file.name);
+  await storageRef.put(file);
+  const imageUrl = await storageRef.getDownloadURL();
+
+  await db.collection("points").add({
+    name,
+    type,
+    x: e.latlng.lng,
+    y: e.latlng.lat,
+    imageUrl
+  });
+
+  addMode = false;
+  alert("Point ajouté !");
+});
+</script>
+
+</body>
+</html>
