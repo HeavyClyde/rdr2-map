@@ -93,8 +93,16 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const storage = firebase.storage();
 
-const map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
 const bounds = [[0,0], [1000,1000]];
+
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -2,          // zoom minimum (tu peux ajuster)
+  maxZoom: 2,           // zoom maximum
+  maxBounds: bounds,    // bloque la carte
+  maxBoundsViscosity: 1.0 // empêche de sortir
+});
+
 L.imageOverlay('map-rdr2.jpg', bounds).addTo(map);
 map.fitBounds(bounds);
 
