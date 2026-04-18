@@ -9,30 +9,21 @@
     body { margin: 0; font-family: 'Special Elite', cursive; background:#1b1a17; color:#f5e6c8; }
     #map { height: 100vh; }
 
-    .menu {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(20,15,10,0.9);
-      padding: 15px;
-      border-radius: 12px;
-      z-index: 1000;
-      box-shadow: 0 0 15px black;
-    }
-
-    input, select, button {
-      display: block;
-      margin-bottom: 8px;
-      width: 180px;
-      padding: 5px;
+    .popup-form input, .popup-form select {
+      width: 100%;
+      margin-bottom: 5px;
       background:#2a2621;
-      border:none;
       color:#f5e6c8;
+      border:none;
+      padding:5px;
     }
 
-    button {
-      cursor: pointer;
+    .popup-form button {
+      width:100%;
       background:#6b4f2a;
+      border:none;
+      padding:5px;
+      cursor:pointer;
     }
 
     .filters {
@@ -45,26 +36,18 @@
       z-index: 1000;
     }
 
-    .filters button {
-      margin: 2px;
-      width: auto;
-      padding: 5px 10px;
+    .compass {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 80px;
+      height: 80px;
+      background: url('https://i.imgur.com/8QfQZ6F.png') no-repeat center/contain;
+      z-index: 1000;
     }
   </style>
 </head>
 <body>
-
-<div class="menu">
-  <input type="text" id="name" placeholder="Nom" />
-  <select id="type">
-    <option value="registre">Registre seul</option>
-    <option value="culture">Table de culture</option>
-    <option value="bandit">Camp de bandit</option>
-    <option value="poi">Point d'intérêt</option>
-  </select>
-  <input type="file" id="image" />
-  <button onclick="enableAddMode()">Ajouter un point</button>
-</div>
 
 <div class="filters">
   <button onclick="setFilter('all')">Tout</button>
@@ -74,6 +57,7 @@
   <button onclick="setFilter('poi')">POI</button>
 </div>
 
+<div class="compass"></div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -93,18 +77,22 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const storage = firebase.storage();
 
-const bounds = [[0,0], [3000,2250]];
+// ✅ CALIBRAGE EXACT IMAGE
+const width = 6000;
+const height = 4500;
+const bounds = [[0,0], [height, width]];
 
 const map = L.map('map', {
   crs: L.CRS.Simple,
-  minZoom: 0,          // zoom minimum (tu peux ajuster)
-  maxZoom: 3,           // zoom maximum
-  maxBounds: bounds,    // bloque la carte
-  maxBoundsViscosity: 1.0 // empêche de sortir
+  minZoom: -2,
+  maxZoom: 2,
+  maxBounds: bounds,
+  maxBoundsViscosity: 1.0
 });
 
 L.imageOverlay('map-rdr2.jpg', bounds).addTo(map);
 map.fitBounds(bounds);
+map.setMaxBounds(bounds);
 
 const icons = {
   registre: L.icon({ iconUrl: 'icons/registre.png', iconSize: [32, 32] }),
@@ -118,15 +106,12 @@ let currentFilter = 'all';
 
 function renderPoint(doc) {
   const p = doc.data();
-
   const marker = L.marker([p.y, p.x], { icon: icons[p.type] }).addTo(map);
-
   marker.data = { id: doc.id, type: p.type };
 
   marker.on('mouseover', () => {
     marker.bindPopup(`
       <b>${p.name}</b><br>
-      <i>${p.type}</i><br>
       <img src="${p.imageUrl}" width="200"><br>
       <button onclick="deletePoint('${doc.id}')">Supprimer</button>
     `).openPopup();
@@ -153,35 +138,48 @@ function setFilter(type) {
 function deletePoint(id) {
   if (confirm("Supprimer ce point ?")) {
     db.collection("points").doc(id).delete();
-    location.reload();
   }
 }
 
-// realtime
-markers = [];
+// 🔄 realtime
 db.collection("points").onSnapshot(snapshot => {
   markers.forEach(m => map.removeLayer(m));
   markers = [];
-
   snapshot.forEach(doc => renderPoint(doc));
   refreshMarkers();
 });
 
-let addMode = false;
-function enableAddMode() {
-  addMode = true;
-  alert("Clique sur la carte pour placer le point");
-}
+// 🖱️ CLIC DROIT → AJOUT POINT
+map.on('contextmenu', function(e) {
 
-map.on('click', async function(e) {
-  if (!addMode) return;
+  const popupContent = `
+    <div class="popup-form">
+      <input type="text" id="p_name" placeholder="Nom" />
+      <select id="p_type">
+        <option value="registre">Registre</option>
+        <option value="culture">Culture</option>
+        <option value="bandit">Bandit</option>
+        <option value="poi">POI</option>
+      </select>
+      <input type="file" id="p_image" />
+      <button onclick="submitPoint(${e.latlng.lat}, ${e.latlng.lng})">Ajouter</button>
+    </div>
+  `;
 
-  const name = document.getElementById("name").value;
-  const type = document.getElementById("type").value;
-  const file = document.getElementById("image").files[0];
+  L.popup()
+    .setLatLng(e.latlng)
+    .setContent(popupContent)
+    .openOn(map);
+});
+
+// ➕ SAVE POINT
+async function submitPoint(lat, lng) {
+  const name = document.getElementById("p_name").value;
+  const type = document.getElementById("p_type").value;
+  const file = document.getElementById("p_image").files[0];
 
   if (!name || !file) {
-    alert("Remplis tous les champs");
+    alert("Champs manquants");
     return;
   }
 
@@ -192,14 +190,13 @@ map.on('click', async function(e) {
   await db.collection("points").add({
     name,
     type,
-    x: e.latlng.lng,
-    y: e.latlng.lat,
+    x: lng,
+    y: lat,
     imageUrl
   });
 
-  addMode = false;
-  alert("Point ajouté !");
-});
+  map.closePopup();
+}
 </script>
 
 </body>
